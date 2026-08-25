@@ -14,9 +14,7 @@ public class YtdlpService : IYtdlpService
 
     public YtdlpService(IConfiguration configuration)
     {
-        bool isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-
-        if (isWindows)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             string toolsFolder = Path.Combine(
                 AppContext.BaseDirectory,
@@ -34,15 +32,13 @@ public class YtdlpService : IYtdlpService
                 toolsFolder,
                 "ffprobe.exe");
 
-            _denoPath = configuration["Tools:DenoPath"]
-                ?? @"C:\Deno\deno.exe";
+            _denoPath = configuration["Tools:DenoPath"];
         }
         else
         {
             _ytdlpPath = "/usr/local/bin/yt-dlp";
             _ffmpegPath = "/usr/bin/ffmpeg";
             _ffprobePath = "/usr/bin/ffprobe";
-
             _denoPath = null;
         }
     }
@@ -88,151 +84,122 @@ public class YtdlpService : IYtdlpService
                 $"yt-dlp info failed. ExitCode: {process.ExitCode}. Error: {error}");
         }
 
-        try
+        using var document = JsonDocument.Parse(output);
+        JsonElement root = document.RootElement;
+
+        var result = new VideoInfoDto
         {
-            using var document =
-                JsonDocument.Parse(output);
+            Id = GetString(root, "id"),
+            Title = GetString(root, "title", "Unknown Title"),
+            Thumbnail = GetString(root, "thumbnail"),
+            DurationSeconds = GetDouble(root, "duration"),
+            DirectUrl = url,
+            AvailableFormats = new List<VideoFormatDto>()
+        };
 
-            JsonElement root =
-                document.RootElement;
-
-            var result = new VideoInfoDto
+        if (root.TryGetProperty(
+                "formats",
+                out JsonElement formats) &&
+            formats.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement format in formats.EnumerateArray())
             {
-                Id = GetString(root, "id"),
-                Title = GetString(
-                    root,
-                    "title",
-                    "Unknown Title"),
-                Thumbnail = GetString(
-                    root,
-                    "thumbnail"),
-                DurationSeconds =
-                    GetDouble(root, "duration"),
-                DirectUrl = url,
-                AvailableFormats =
-                    new List<VideoFormatDto>()
-            };
+                string formatId =
+                    GetString(format, "format_id");
 
-            if (root.TryGetProperty(
-                    "formats",
-                    out JsonElement formats) &&
-                formats.ValueKind ==
-                JsonValueKind.Array)
-            {
-                foreach (
-                    JsonElement format
-                    in formats.EnumerateArray())
+                if (string.IsNullOrWhiteSpace(formatId))
                 {
-                    string formatId =
-                        GetString(
-                            format,
-                            "format_id");
-
-                    if (string.IsNullOrWhiteSpace(
-                        formatId))
-                    {
-                        continue;
-                    }
-
-                    string extension =
-                        GetString(format, "ext");
-
-                    string videoCodec =
-                        GetString(format, "vcodec");
-
-                    string audioCodec =
-                        GetString(format, "acodec");
-
-                    string resolution =
-                        GetString(format, "resolution");
-
-                    int width =
-                        GetInt(format, "width");
-
-                    int height =
-                        GetInt(format, "height");
-
-                    bool isAudioOnly =
-                        string.Equals(
-                            videoCodec,
-                            "none",
-                            StringComparison.OrdinalIgnoreCase)
-                        &&
-                        !string.Equals(
-                            audioCodec,
-                            "none",
-                            StringComparison.OrdinalIgnoreCase);
-
-                    bool hasVideo =
-                        !string.IsNullOrWhiteSpace(
-                            videoCodec)
-                        &&
-                        !string.Equals(
-                            videoCodec,
-                            "none",
-                            StringComparison.OrdinalIgnoreCase);
-
-                    if (!isAudioOnly && !hasVideo)
-                    {
-                        continue;
-                    }
-
-                    if (!isAudioOnly &&
-                        width <= 0 &&
-                        height <= 0)
-                    {
-                        continue;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(
-                        resolution))
-                    {
-                        resolution =
-                            width > 0 && height > 0
-                                ? $"{width}x{height}"
-                                : "Unknown";
-                    }
-
-                    string displayResolution =
-                        isAudioOnly
-                            ? "Audio Only"
-                            : resolution;
-
-                    if (result.AvailableFormats.Any(
-                        x => x.FormatId == formatId))
-                    {
-                        continue;
-                    }
-
-                    result.AvailableFormats.Add(
-                        new VideoFormatDto
-                        {
-                            FormatId = formatId,
-                            Extension = extension,
-                            Resolution =
-                                displayResolution,
-                            IsAudioOnly =
-                                isAudioOnly
-                        });
+                    continue;
                 }
+
+                string extension =
+                    GetString(format, "ext");
+
+                string videoCodec =
+                    GetString(format, "vcodec");
+
+                string audioCodec =
+                    GetString(format, "acodec");
+
+                string resolution =
+                    GetString(format, "resolution");
+
+                int width =
+                    GetInt(format, "width");
+
+                int height =
+                    GetInt(format, "height");
+
+                bool isAudioOnly =
+                    string.Equals(
+                        videoCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase)
+                    &&
+                    !string.Equals(
+                        audioCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase);
+
+                bool hasVideo =
+                    !string.IsNullOrWhiteSpace(videoCodec)
+                    &&
+                    !string.Equals(
+                        videoCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase);
+
+                if (!isAudioOnly && !hasVideo)
+                {
+                    continue;
+                }
+
+                if (!isAudioOnly &&
+                    width <= 0 &&
+                    height <= 0)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(resolution))
+                {
+                    resolution =
+                        width > 0 && height > 0
+                            ? $"{width}x{height}"
+                            : "Unknown";
+                }
+
+                string displayResolution =
+                    isAudioOnly
+                        ? "Audio Only"
+                        : resolution;
+
+                if (result.AvailableFormats.Any(
+                        x => x.FormatId == formatId))
+                {
+                    continue;
+                }
+
+                result.AvailableFormats.Add(
+                    new VideoFormatDto
+                    {
+                        FormatId = formatId,
+                        Extension = extension,
+                        Resolution = displayResolution,
+                        IsAudioOnly = isAudioOnly
+                    });
             }
-
-            result.AvailableFormats =
-                result.AvailableFormats
-                    .OrderByDescending(
-                        x => GetResolutionNumber(
-                            x.Resolution))
-                    .ThenBy(
-                        x => x.IsAudioOnly)
-                    .ToList();
-
-            return result;
         }
-        catch (JsonException ex)
-        {
-            throw new Exception(
-                $"Could not read yt-dlp JSON response. {ex.Message}");
-        }
+
+        result.AvailableFormats =
+            result.AvailableFormats
+                .OrderByDescending(
+                    x => GetResolutionNumber(x.Resolution))
+                .ThenBy(
+                    x => x.IsAudioOnly)
+                .ToList();
+
+        return result;
     }
 
     public async Task<string?> DownloadAsync(
@@ -252,16 +219,14 @@ public class YtdlpService : IYtdlpService
                 AppContext.BaseDirectory,
                 "Downloads");
 
-        Directory.CreateDirectory(
-            downloadFolder);
+        Directory.CreateDirectory(downloadFolder);
 
         string jobFolder =
             Path.Combine(
                 downloadFolder,
                 Guid.NewGuid().ToString("N"));
 
-        Directory.CreateDirectory(
-            jobFolder);
+        Directory.CreateDirectory(jobFolder);
 
         string outputTemplate =
             Path.Combine(
@@ -279,31 +244,19 @@ public class YtdlpService : IYtdlpService
 
             AddCommonArguments(startInfo);
 
+            startInfo.ArgumentList.Add("--no-playlist");
+            startInfo.ArgumentList.Add("--newline");
+            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--restrict-filenames");
+            startInfo.ArgumentList.Add("--ffmpeg-location");
             startInfo.ArgumentList.Add(
-                "--no-playlist");
-
-            startInfo.ArgumentList.Add(
-                "--newline");
-
-            startInfo.ArgumentList.Add(
-                "--no-warnings");
-
-            startInfo.ArgumentList.Add(
-                "--restrict-filenames");
-
-            startInfo.ArgumentList.Add(
-                "--ffmpeg-location");
-
-            startInfo.ArgumentList.Add(
-                Path.GetDirectoryName(
-                    _ffmpegPath)!);
+                Path.GetDirectoryName(_ffmpegPath)!);
 
             startInfo.ArgumentList.Add("-f");
 
             if (isAudioOnly)
             {
-                startInfo.ArgumentList.Add(
-                    formatId);
+                startInfo.ArgumentList.Add(formatId);
             }
             else
             {
@@ -317,10 +270,7 @@ public class YtdlpService : IYtdlpService
             startInfo.ArgumentList.Add("mp4");
 
             startInfo.ArgumentList.Add("-o");
-
-            startInfo.ArgumentList.Add(
-                outputTemplate);
-
+            startInfo.ArgumentList.Add(outputTemplate);
             startInfo.ArgumentList.Add(url);
 
             using var process = new Process
@@ -368,13 +318,11 @@ public class YtdlpService : IYtdlpService
                             new FileInfo(file).Length)
                     .FirstOrDefault();
 
-            if (string.IsNullOrWhiteSpace(
-                    downloadedFile) ||
+            if (string.IsNullOrWhiteSpace(downloadedFile) ||
                 !File.Exists(downloadedFile))
             {
                 throw new Exception(
-                    "yt-dlp completed, but the downloaded file was not found. Output: "
-                    + output);
+                    "yt-dlp completed, but the downloaded file was not found.");
             }
 
             return downloadedFile;
@@ -451,15 +399,12 @@ public class YtdlpService : IYtdlpService
         if (!root.TryGetProperty(
                 "formats",
                 out JsonElement formats) ||
-            formats.ValueKind !=
-            JsonValueKind.Array)
+            formats.ValueKind != JsonValueKind.Array)
         {
             return false;
         }
 
-        foreach (
-            JsonElement format
-            in formats.EnumerateArray())
+        foreach (JsonElement format in formats.EnumerateArray())
         {
             string currentFormatId =
                 GetString(
@@ -467,9 +412,9 @@ public class YtdlpService : IYtdlpService
                     "format_id");
 
             if (!string.Equals(
-                currentFormatId,
-                formatId,
-                StringComparison.OrdinalIgnoreCase))
+                    currentFormatId,
+                    formatId,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -501,8 +446,7 @@ public class YtdlpService : IYtdlpService
         {
             FileName = _ytdlpPath,
             WorkingDirectory =
-                Path.GetDirectoryName(
-                    _ytdlpPath)
+                Path.GetDirectoryName(_ytdlpPath)
                 ?? AppContext.BaseDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -514,8 +458,7 @@ public class YtdlpService : IYtdlpService
     private void AddCommonArguments(
         ProcessStartInfo processInfo)
     {
-        if (!string.IsNullOrWhiteSpace(
-                _denoPath) &&
+        if (!string.IsNullOrWhiteSpace(_denoPath) &&
             File.Exists(_denoPath))
         {
             processInfo.ArgumentList.Add(
@@ -565,14 +508,9 @@ public class YtdlpService : IYtdlpService
             return defaultValue;
         }
 
-        if (value.ValueKind ==
-            JsonValueKind.String)
-        {
-            return value.GetString()
-                ?? defaultValue;
-        }
-
-        return defaultValue;
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? defaultValue
+            : defaultValue;
     }
 
     private static double GetDouble(
@@ -586,10 +524,8 @@ public class YtdlpService : IYtdlpService
             return 0;
         }
 
-        if (value.ValueKind ==
-                JsonValueKind.Number &&
-            value.TryGetDouble(
-                out double result))
+        if (value.ValueKind == JsonValueKind.Number &&
+            value.TryGetDouble(out double result))
         {
             return result;
         }
@@ -608,10 +544,8 @@ public class YtdlpService : IYtdlpService
             return 0;
         }
 
-        if (value.ValueKind ==
-                JsonValueKind.Number &&
-            value.TryGetInt32(
-                out int result))
+        if (value.ValueKind == JsonValueKind.Number &&
+            value.TryGetInt32(out int result))
         {
             return result;
         }
@@ -622,8 +556,7 @@ public class YtdlpService : IYtdlpService
     private static int GetResolutionNumber(
         string? resolution)
     {
-        if (string.IsNullOrWhiteSpace(
-                resolution))
+        if (string.IsNullOrWhiteSpace(resolution))
         {
             return 0;
         }
@@ -640,4 +573,4 @@ public class YtdlpService : IYtdlpService
             ? result
             : 0;
     }
-}}
+}
