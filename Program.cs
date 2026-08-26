@@ -1,9 +1,9 @@
+using VideoDownloader.Web.Services;
+
 Environment.SetEnvironmentVariable(
     "DOTNET_USE_POLLING_FILE_WATCHER",
     "1"
 );
-
-using VideoDownloader.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
