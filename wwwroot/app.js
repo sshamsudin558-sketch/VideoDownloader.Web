@@ -153,12 +153,13 @@ async function readApiError(response) {
     const responseText = await response.text();
 
     if (!responseText) {
-        return `Request failed(${response.status }).`;
+        return `Request failed (${response.status}).`;
     }
 
     try {
         const data = JSON.parse(responseText);
-        return data.message || data.error || `Request failed(${ response.status }).`;
+
+        return data.message || data.error || `Request failed (${response.status}).`;
     } catch {
         return responseText;
     }
