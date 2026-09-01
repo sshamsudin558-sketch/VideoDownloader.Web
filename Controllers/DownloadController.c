@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 using VideoDownloader.Web.Services;
 
 namespace VideoDownloader.Web.Controllers;
@@ -15,12 +14,7 @@ public class DownloadController : ControllerBase
         _ytdlpService = ytdlpService;
     }
 
-    // =========================================================
-    // Get Video Information
-    // =========================================================
-
     [HttpPost("info")]
-    [EnableRateLimiting("info")]
     public async Task<IActionResult> GetInfo(
         [FromBody] DownloadRequestDto request)
     {
@@ -39,22 +33,19 @@ public class DownloadController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Please enter a valid HTTP or HTTPS video URL."
+                message = "Please enter a valid HTTP or HTTPS video URL."
             });
         }
 
         try
         {
-            var result =
-                await _ytdlpService.GetVideoInfoAsync(url);
+            var result = await _ytdlpService.GetVideoInfoAsync(url);
 
             if (result == null)
             {
                 return NotFound(new
                 {
-                    message =
-                        "Video information was not found."
+                    message = "Video information was not found."
                 });
             }
 
@@ -64,32 +55,23 @@ public class DownloadController : ControllerBase
         {
             return StatusCode(500, new
             {
-                message =
-                    "Downloader tools are missing.",
+                message = "Downloader tools are missing.",
                 error = ex.Message
             });
         }
         catch (Exception ex)
         {
-            Console.WriteLine(
-                $"Get video info error: {ex}");
+            Console.WriteLine($"Get video info error: {ex}");
 
             return StatusCode(500, new
             {
-                message =
-                    "Could not retrieve video information.",
+                message = "Could not retrieve video information.",
                 error = ex.Message
             });
         }
     }
 
-
-    // =========================================================
-    // Download Video
-    // =========================================================
-
     [HttpPost]
-    [EnableRateLimiting("download")]
     public async Task<IActionResult> Download(
         [FromBody] DownloadFileRequestDto request)
     {
@@ -97,8 +79,7 @@ public class DownloadController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Download request is required."
+                message = "Download request is required."
             });
         }
 
@@ -106,19 +87,7 @@ public class DownloadController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Video URL is required."
-            });
-        }
-
-        string url = request.Url.Trim();
-
-        if (!IsValidUrl(url))
-        {
-            return BadRequest(new
-            {
-                message =
-                    "Please enter a valid HTTP or HTTPS video URL."
+                message = "Video URL is required."
             });
         }
 
@@ -126,32 +95,34 @@ public class DownloadController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Please select a download format."
+                message = "Please select a download format."
             });
         }
 
+        string url = request.Url.Trim();
         string formatId = request.FormatId.Trim();
+
+        if (!IsValidUrl(url))
+        {
+            return BadRequest(new
+            {
+                message = "Please enter a valid HTTP or HTTPS video URL."
+            });
+        }
 
         string? filePath = null;
 
         try
         {
-            // =================================================
-            // Start yt-dlp Download
-            // =================================================
-
-            filePath =
-                await _ytdlpService.DownloadAsync(
-                    url,
-                    formatId);
+            filePath = await _ytdlpService.DownloadAsync(
+                url,
+                formatId);
 
             if (string.IsNullOrWhiteSpace(filePath))
             {
                 return NotFound(new
                 {
-                    message =
-                        "Downloaded file was not created."
+                    message = "Downloaded file was not created."
                 });
             }
 
@@ -159,70 +130,12 @@ public class DownloadController : ControllerBase
             {
                 return NotFound(new
                 {
-                    message =
-                        "Downloaded file was not found."
+                    message = "Downloaded file was not found."
                 });
             }
 
-
-            // =================================================
-            // File Information
-            // =================================================
-
-            string contentType =
-                GetContentType(filePath);
-
-            string fileName =
-                Path.GetFileName(filePath);
-
-            string fileToDelete =
-                filePath;
-
-
-            // =================================================
-            // Cleanup After Response
-            // =================================================
-
-            HttpContext.Response.OnCompleted(() =>
-            {
-                try
-                {
-                    if (System.IO.File.Exists(fileToDelete))
-                    {
-                        System.IO.File.Delete(
-                            fileToDelete);
-                    }
-
-                    string? directory =
-                        Path.GetDirectoryName(
-                            fileToDelete);
-
-                    if (
-                        !string.IsNullOrWhiteSpace(directory) &&
-                        Directory.Exists(directory) &&
-                        !Directory
-                            .EnumerateFileSystemEntries(
-                                directory)
-                            .Any()
-                    )
-                    {
-                        Directory.Delete(
-                            directory);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(
-                        $"Download cleanup error: {ex.Message}");
-                }
-
-                return Task.CompletedTask;
-            });
-
-
-            // =================================================
-            // Return File
-            // =================================================
+            string contentType = GetContentType(filePath);
+            string fileName = Path.GetFileName(filePath);
 
             return PhysicalFile(
                 filePath,
@@ -234,8 +147,7 @@ public class DownloadController : ControllerBase
         {
             return StatusCode(500, new
             {
-                message =
-                    "Downloader tools are missing.",
+                message = "Downloader tools are missing.",
                 error = ex.Message
             });
         }
@@ -246,57 +158,41 @@ public class DownloadController : ControllerBase
             {
                 try
                 {
-                    System.IO.File.Delete(
-                        filePath);
+                    System.IO.File.Delete(filePath);
                 }
                 catch
                 {
-                    // Ignore cleanup errors.
                 }
             }
 
             return StatusCode(499, new
             {
-                message =
-                    "Download was cancelled."
+                message = "Download was cancelled."
             });
         }
         catch (Exception ex)
         {
-            Console.WriteLine(
-                $"Download error: {ex}");
-
-            // =================================================
-            // Cleanup Failed Download
-            // =================================================
+            Console.WriteLine($"Download error: {ex}");
 
             if (!string.IsNullOrWhiteSpace(filePath) &&
                 System.IO.File.Exists(filePath))
             {
                 try
                 {
-                    System.IO.File.Delete(
-                        filePath);
+                    System.IO.File.Delete(filePath);
                 }
                 catch
                 {
-                    // Ignore cleanup errors.
                 }
             }
 
             return StatusCode(500, new
             {
-                message =
-                    "Download failed.",
+                message = "Download failed.",
                 error = ex.Message
             });
         }
     }
-
-
-    // =========================================================
-    // URL Validation
-    // =========================================================
 
     private static bool IsValidUrl(string? url)
     {
@@ -313,77 +209,40 @@ public class DownloadController : ControllerBase
             return false;
         }
 
-        return
-            uri.Scheme == Uri.UriSchemeHttp ||
-            uri.Scheme == Uri.UriSchemeHttps;
+        return uri.Scheme == Uri.UriSchemeHttp ||
+               uri.Scheme == Uri.UriSchemeHttps;
     }
 
-
-    // =========================================================
-    // Content Type
-    // =========================================================
-
-    private static string GetContentType(
-        string filePath)
+    private static string GetContentType(string filePath)
     {
-        string extension =
-            Path.GetExtension(filePath)
-                .ToLowerInvariant();
+        string extension = Path.GetExtension(filePath)
+            .ToLowerInvariant();
 
         return extension switch
         {
-            ".mp4" =>
-                "video/mp4",
+            ".mp4" => "video/mp4",
+            ".webm" => "video/webm",
+            ".mkv" => "video/x-matroska",
+            ".m4v" => "video/x-m4v",
+            ".mov" => "video/quicktime",
+            ".avi" => "video/x-msvideo",
 
-            ".webm" =>
-                "video/webm",
+            ".m4a" => "audio/mp4",
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".aac" => "audio/aac",
+            ".ogg" => "audio/ogg",
+            ".opus" => "audio/opus",
 
-            ".mkv" =>
-                "video/x-matroska",
-
-            ".m4v" =>
-                "video/x-m4v",
-
-            ".mov" =>
-                "video/quicktime",
-
-            ".avi" =>
-                "video/x-msvideo",
-
-            ".m4a" =>
-                "audio/mp4",
-
-            ".mp3" =>
-                "audio/mpeg",
-
-            ".wav" =>
-                "audio/wav",
-
-            ".aac" =>
-                "audio/aac",
-
-            ".ogg" =>
-                "audio/ogg",
-
-            ".opus" =>
-                "audio/opus",
-
-            _ =>
-                "application/octet-stream"
+            _ => "application/octet-stream"
         };
     }
 }
-
-
-// =============================================================
-// Request DTOs
-// =============================================================
 
 public class DownloadRequestDto
 {
     public string Url { get; set; } = string.Empty;
 }
-
 
 public class DownloadFileRequestDto
 {
