@@ -505,3 +505,5 @@ videoUrlInput.addEventListener("keydown", function (event) {
         getVideoInfo();
     }
 });
+getVideoBtn.addEventListener("click", getVideoInfo);
+downloadBtn.addEventListener("click", downloadVideo);
