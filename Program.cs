@@ -14,15 +14,30 @@ builder.Services.AddScoped<IYtdlpService, YtdlpService>();
 builder.Services.AddHostedService<DownloadCleanupService>();
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+    {
+        Title = "VideoDownloader.Web API",
+        Version = "v1",
+        Description = "Video Downloader API"
+    });
+});
 
 var app = builder.Build();
 
+app.UseSwagger();
 
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    options.SwaggerEndpoint(
+        "/swagger/v1/swagger.json",
+        "VideoDownloader.Web v1"
+    );
+
+    options.RoutePrefix = "swagger";
+});
 
 app.UseStaticFiles();
 
