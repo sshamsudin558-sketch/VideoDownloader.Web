@@ -21,6 +21,9 @@ RUN apt-get update \
        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
+    && curl -fsSL https://deno.land/install.sh \
+       | DENO_INSTALL=/usr/local sh \
+    && ln -sf /usr/local/bin/deno /usr/bin/deno \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -28,6 +31,8 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 ENV ASPNETCORE_URLS=http://+:8080
+
+ENV TOOLS_DENO_PATH=/usr/local/bin/deno
 
 EXPOSE 8080
 
