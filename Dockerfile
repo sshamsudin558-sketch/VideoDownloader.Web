@@ -32,7 +32,7 @@ COPY --from=build /app/publish .
 
 ENV ASPNETCORE_URLS=http://+:8080
 
-ENV TOOLS_DENO_PATH=/usr/local/bin/deno
+ENV Tools__DenoPath=/usr/local/bin/deno
 
 EXPOSE 8080
 
