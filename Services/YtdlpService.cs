@@ -39,7 +39,13 @@ public class YtdlpService : IYtdlpService
             _ytdlpPath = "/usr/local/bin/yt-dlp";
             _ffmpegPath = "/usr/bin/ffmpeg";
             _ffprobePath = "/usr/bin/ffprobe";
-            _denoPath = null;
+
+            _denoPath = configuration["Tools:DenoPath"];
+
+            if (string.IsNullOrWhiteSpace(_denoPath))
+            {
+                _denoPath = "/usr/local/bin/deno";
+            }
         }
     }
 
@@ -90,6 +96,506 @@ public class YtdlpService : IYtdlpService
         var result = new VideoInfoDto
         {
             Id = GetString(root, "id"),
+            Title = GetString(root, "title", "Unknown Title"),
+            Thumbnail = GetString(root, "thumbnail"),
+            DurationSeconds = GetDouble(root, "duration"),
+            DirectUrl = url,
+            AvailableFormats = new List<VideoFormatDto>()
+        };
+
+        if (root.TryGetProperty(
+                "formats",
+                out JsonElement formats) &&
+            formats.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement format in formats.EnumerateArray())
+            {
+                string formatId =
+                    GetString(format, "format_id");
+
+                if (string.IsNullOrWhiteSpace(formatId))
+                {
+                    continue;
+                }
+
+                string extension =
+                    GetString(format, "ext");
+
+                string videoCodec =
+                    GetString(format, "vcodec");
+
+                string audioCodec =
+                    GetString(format, "acodec");
+
+                string resolution =
+                    GetString(format, "resolution");
+
+                int width =
+                    GetInt(format, "width");
+
+                int height =
+                    GetInt(format, "height");
+
+                bool isAudioOnly =
+                    string.Equals(
+                        videoCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase)
+                    &&
+                    !string.Equals(
+                        audioCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase);
+
+                bool hasVideo =
+                    !string.IsNullOrWhiteSpace(videoCodec)
+                    &&
+                    !string.Equals(
+                        videoCodec,
+                        "none",
+                        StringComparison.OrdinalIgnoreCase);
+
+                if (!isAudioOnly && !hasVideo)
+                {
+                    continue;
+                }
+
+                if (!isAudioOnly &&
+                    width <= 0 &&
+                    height <= 0)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(resolution))
+                {
+                    resolution =
+                        width > 0 && height > 0
+                            ? $"{width}x{height}"
+                            : "Unknown";
+                }
+
+                string displayResolution =
+                    isAudioOnly
+                        ? "Audio Only"
+                        : resolution;
+
+                if (result.AvailableFormats.Any(
+                        x => x.FormatId == formatId))
+                {
+                    continue;
+                }
+
+                result.AvailableFormats.Add(
+                    new VideoFormatDto
+                    {
+                        FormatId = formatId,
+                        Extension = extension,
+                        Resolution = displayResolution,
+                        IsAudioOnly = isAudioOnly
+                    });
+            }
+        }
+
+        result.AvailableFormats =
+            result.AvailableFormats
+                .OrderByDescending(
+                    x => GetResolutionNumber(x.Resolution))
+                .ThenBy(
+                    x => x.IsAudioOnly)
+                .ToList();
+
+        return result;
+    }
+
+    public async Task<string?> DownloadAsync(
+        string url,
+        string formatId)
+    {
+        if (string.IsNullOrWhiteSpace(url) ||
+            string.IsNullOrWhiteSpace(formatId))
+        {
+            return null;
+        }
+
+        CheckTools();
+
+        string downloadFolder =
+            Path.Combine(
+                AppContext.BaseDirectory,
+                "Downloads");
+
+        Directory.CreateDirectory(downloadFolder);
+
+        string jobFolder =
+            Path.Combine(
+                downloadFolder,
+                Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(jobFolder);
+
+        string outputTemplate =
+            Path.Combine(
+                jobFolder,
+                "%(title)s [%(id)s].%(ext)s");
+
+        try
+        {
+            bool isAudioOnly =
+                await IsAudioFormatAsync(
+                    url,
+                    formatId);
+
+            var startInfo = CreateProcess();
+
+            AddCommonArguments(startInfo);
+
+            startInfo.ArgumentList.Add("--no-playlist");
+            startInfo.ArgumentList.Add("--newline");
+            startInfo.ArgumentList.Add("--no-warnings");
+            startInfo.ArgumentList.Add("--restrict-filenames");
+
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(outputTemplate);
+
+            startInfo.ArgumentList.Add("--ffmpeg-location");
+            startInfo.ArgumentList.Add(_ffmpegPath);
+
+            if (isAudioOnly)
+            {
+                startInfo.ArgumentList.Add("--extract-audio");
+                startInfo.ArgumentList.Add("--audio-format");
+                startInfo.ArgumentList.Add("mp3");
+
+                startInfo.ArgumentList.Add("--format");
+                startInfo.ArgumentList.Add(formatId);
+            }
+            else
+            {
+                startInfo.ArgumentList.Add("--format");
+                startInfo.ArgumentList.Add(
+                    $"{formatId}+bestaudio/{formatId}");
+
+                startInfo.ArgumentList.Add(
+                    "--merge-output-format");
+
+                startInfo.ArgumentList.Add("mp4");
+            }
+
+            startInfo.ArgumentList.Add(url);
+
+            using var process = new Process
+            {
+                StartInfo = startInfo
+            };
+
+            process.Start();
+
+            Task<string> outputTask =
+                process.StandardOutput.ReadToEndAsync();
+
+            Task<string> errorTask =
+                process.StandardError.ReadToEndAsync();
+
+            await process.WaitForExitAsync();
+
+            string output = await outputTask;
+            string error = await errorTask;
+
+            if (process.ExitCode != 0)
+            {
+                throw new Exception(
+                    $"yt-dlp download failed. ExitCode: {process.ExitCode}. Error: {error}");
+            }
+
+            string? downloadedFile =
+                Directory
+                    .GetFiles(jobFolder)
+                    .OrderByDescending(
+                        File.GetLastWriteTimeUtc)
+                    .FirstOrDefault();
+
+            return downloadedFile;
+        }
+        catch
+        {
+            try
+            {
+                if (Directory.Exists(jobFolder))
+                {
+                    Directory.Delete(
+                        jobFolder,
+                        true);
+                }
+            }
+            catch
+            {
+                // Ignore cleanup errors.
+            }
+
+            throw;
+        }
+    }
+
+    private async Task<bool> IsAudioFormatAsync(
+        string url,
+        string formatId)
+    {
+        var startInfo = CreateProcess();
+
+        AddCommonArguments(startInfo);
+
+        startInfo.ArgumentList.Add(
+            "--dump-single-json");
+
+        startInfo.ArgumentList.Add(
+            "--no-playlist");
+
+        startInfo.ArgumentList.Add(url);
+
+        using var process = new Process
+        {
+            StartInfo = startInfo
+        };
+
+        process.Start();
+
+        Task<string> outputTask =
+            process.StandardOutput.ReadToEndAsync();
+
+        Task<string> errorTask =
+            process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync();
+
+        string output = await outputTask;
+        string error = await errorTask;
+
+        if (process.ExitCode != 0 ||
+            string.IsNullOrWhiteSpace(output))
+        {
+            throw new Exception(
+                $"yt-dlp format check failed. ExitCode: {process.ExitCode}. Error: {error}");
+        }
+
+        using var document =
+            JsonDocument.Parse(output);
+
+        JsonElement root =
+            document.RootElement;
+
+        if (!root.TryGetProperty(
+                "formats",
+                out JsonElement formats) ||
+            formats.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (JsonElement format in formats.EnumerateArray())
+        {
+            string id =
+                GetString(
+                    format,
+                    "format_id");
+
+            if (!string.Equals(
+                    id,
+                    formatId,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string videoCodec =
+                GetString(
+                    format,
+                    "vcodec");
+
+            string audioCodec =
+                GetString(
+                    format,
+                    "acodec");
+
+            return
+                string.Equals(
+                    videoCodec,
+                    "none",
+                    StringComparison.OrdinalIgnoreCase)
+                &&
+                !string.Equals(
+                    audioCodec,
+                    "none",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private ProcessStartInfo CreateProcess()
+    {
+        return new ProcessStartInfo
+        {
+            FileName = _ytdlpPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+    }
+
+    private void AddCommonArguments(
+        ProcessStartInfo startInfo)
+    {
+        startInfo.ArgumentList.Add(
+            "--extractor-args");
+
+        startInfo.ArgumentList.Add(
+            "youtube:player_client=android");
+
+        if (!string.IsNullOrWhiteSpace(_denoPath) &&
+            File.Exists(_denoPath))
+        {
+            startInfo.ArgumentList.Add(
+                "--js-runtimes");
+
+            startInfo.ArgumentList.Add(
+                $"deno:{_denoPath}");
+        }
+    }
+
+    private void CheckTools()
+    {
+        if (!File.Exists(_ytdlpPath))
+        {
+            throw new FileNotFoundException(
+                $"yt-dlp was not found: {_ytdlpPath}");
+        }
+
+        if (!File.Exists(_ffmpegPath))
+        {
+            throw new FileNotFoundException(
+                $"ffmpeg was not found: {_ffmpegPath}");
+        }
+
+        if (!File.Exists(_ffprobePath))
+        {
+            throw new FileNotFoundException(
+                $"ffprobe was not found: {_ffprobePath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_denoPath) &&
+            !File.Exists(_denoPath))
+        {
+            throw new FileNotFoundException(
+                $"Deno was not found: {_denoPath}");
+        }
+    }
+
+    private static string GetString(
+        JsonElement element,
+        string propertyName,
+        string defaultValue = "")
+    {
+        if (!element.TryGetProperty(
+                propertyName,
+                out JsonElement property))
+        {
+            return defaultValue;
+        }
+
+        if (property.ValueKind ==
+            JsonValueKind.String)
+        {
+            return property.GetString()
+                   ?? defaultValue;
+        }
+
+        return property.ToString();
+    }
+
+    private static double GetDouble(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(
+                propertyName,
+                out JsonElement property))
+        {
+            return 0;
+        }
+
+        if (property.TryGetDouble(
+                out double value))
+        {
+            return value;
+        }
+
+        return 0;
+    }
+
+    private static int GetInt(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(
+                propertyName,
+                out JsonElement property))
+        {
+            return 0;
+        }
+
+        if (property.TryGetInt32(
+                out int value))
+        {
+            return value;
+        }
+
+        return 0;
+    }
+
+    private static int GetResolutionNumber(
+        string resolution)
+    {
+        if (string.IsNullOrWhiteSpace(resolution))
+        {
+            return 0;
+        }
+
+        if (resolution.Equals(
+                "Audio Only",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        string[] parts =
+            resolution
+                .Split(
+                    'x',
+                    StringSplitOptions.RemoveEmptyEntries);
+
+        if (parts.Length == 2 &&
+            int.TryParse(
+                parts[1],
+                out int height))
+        {
+            return height;
+        }
+
+        string digits =
+            new string(
+                resolution
+                    .Where(char.IsDigit)
+                    .ToArray());
+
+        return int.TryParse(
+            digits,
+            out int result)
+                ? result
+                : 0;
+    }
+}            Id = GetString(root, "id"),
             Title = GetString(root, "title", "Unknown Title"),
             Thumbnail = GetString(root, "thumbnail"),
             DurationSeconds = GetDouble(root, "duration"),
