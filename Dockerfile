@@ -17,6 +17,7 @@ RUN apt-get update \
        python3 \
        curl \
        ca-certificates \
+       unzip \
     && curl -L \
        https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
